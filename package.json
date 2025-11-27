@@ -1,0 +1,25 @@
+{
+  "name": "ipd-measurement-app",
+  "version": "1.0.0",
+  "description": "Interpupillary Distance Measurement for VR Gaming using MediaPipe AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "ipd",
+    "vr",
+    "mediapipe",
+    "face-detection",
+    "gaming"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
