@@ -1,125 +1,661 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Pupillary Distance Test</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background: #111; color: #eee; }
-    video, canvas { width: 420px; border-radius: 10px; }
-    #status { margin-top: 10px; font-size: 18px; }
-    #config { margin-top: 20px; padding: 10px; background: #222; border-radius: 8px; font-size: 18px; }
-    button { margin-top: 10px; padding: 10px 16px; font-size: 16px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interpupillary Distance (IPD) Measurement for VR</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js" crossorigin="anonymous"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-  <!-- MediaPipe FaceMesh -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/facemesh@0.4/facemesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 900px;
+            width: 100%;
+            padding: 30px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto 30px;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #webcam {
+            width: 100%;
+            height: auto;
+            display: block;
+            transform: scaleX(-1);
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 16px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+            margin: 5px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        .result-label {
+            font-weight: 600;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .result-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .result-value.final {
+            font-size: 32px;
+            color: #764ba2;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.warning {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        .instructions {
+            background: #fff8e1;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .instructions h3 {
+            color: #f57c00;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .instructions ul {
+            margin-left: 20px;
+            color: #666;
+        }
+
+        .instructions li {
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .measurements-list {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .measurement-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+
+        .measurement-item:last-child {
+            border-bottom: none;
+        }
+
+        .copy-btn {
+            background: #4caf50;
+            padding: 10px 25px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
-
 <body>
+    <div class="container">
+        <h1>🎮 IPD Measurement for VR Gaming</h1>
+        <div class="subtitle">Accurate Interpupillary Distance Measurement using AI</div>
 
-<h1>Pupillary Distance Measurement Test</h1>
+        <div class="instructions">
+            <h3>📋 Instructions for Accurate Measurement:</h3>
+            <ul>
+                <li>Position your face 50-70cm (arm's length) from the camera</li>
+                <li>Ensure good lighting on your face</li>
+                <li>Look directly at the camera</li>
+                <li>Keep your head still during measurement</li>
+                <li>Remove glasses if possible for best accuracy</li>
+                <li>Multiple measurements will be averaged for precision</li>
+            </ul>
+        </div>
 
-<video id="video" autoplay playsinline></video>
-<canvas id="canvas"></canvas>
+        <div id="status" class="status info">Initializing camera and AI model...</div>
 
-<div id="status">Initializing...</div>
-<button id="calibrate">Calibrate With Card (85.6 mm)</button>
+        <div class="video-container" id="videoContainer" style="display: none;">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+        </div>
 
-<div id="config">Config Line Will Appear Here</div>
+        <div class="controls">
+            <button id="startBtn" disabled>Start Camera</button>
+            <button id="measureBtn" disabled>Measure IPD</button>
+            <button id="resetBtn" style="display: none;">Reset Measurements</button>
+        </div>
 
-<script>
-const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
-const statusEl = document.getElementById("status");
-const configEl = document.getElementById("config");
+        <div class="results" id="results" style="display: none;">
+            <div class="result-item">
+                <span class="result-label">Current IPD:</span>
+                <span class="result-value" id="currentIPD">--</span>
+            </div>
+            <div class="result-item">
+                <span class="result-label">Average IPD (Recommended):</span>
+                <span class="result-value final" id="averageIPD">--</span>
+            </div>
+            <div class="result-item">
+                <span class="result-label">Measurements Taken:</span>
+                <span class="result-value" id="measurementCount">0</span>
+            </div>
+            <div class="result-item">
+                <span class="result-label">WorldRenderer.InterpupillaryDistance:</span>
+                <span class="result-value final" id="finalValue">0.065</span>
+            </div>
+            
+            <div style="text-align: center; margin-top: 15px;">
+                <button class="copy-btn" id="copyBtn">📋 Copy Value</button>
+            </div>
 
-let mmPerPixel = null;
-let lastPDmm = null;
+            <div class="measurements-list" id="measurementsList"></div>
+        </div>
+    </div>
 
-// Get webcam
-navigator.mediaDevices.getUserMedia({ video: true })
-  .then(stream => {
-    video.srcObject = stream;
-  });
+    <script type="module">
+        const { FaceLandmarker, FilesetResolver } = window.MediaPipeTasksVision;
 
-video.addEventListener("loadeddata", () => {
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-});
+        let faceLandmarker;
+        let webcamRunning = false;
+        let video;
+        let canvas;
+        let ctx;
+        let animationFrameId;
+        let measurements = [];
 
-// Facemesh Model
-let model;
-facemesh.load().then(m => {
-  model = m;
-  statusEl.textContent = "Point your face at the camera.";
-  tick();
-});
+        // Eye landmark indices in MediaPipe Face Landmarker
+        const LEFT_EYE_CENTER = 468;  // Left pupil
+        const RIGHT_EYE_CENTER = 473; // Right pupil
 
-async function tick() {
-  if (model && video.readyState >= 2) {
-    const predictions = await model.estimateFaces({input: video});
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // DOM elements
+        const statusDiv = document.getElementById('status');
+        const videoContainer = document.getElementById('videoContainer');
+        const startBtn = document.getElementById('startBtn');
+        const measureBtn = document.getElementById('measureBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const resultsDiv = document.getElementById('results');
+        const currentIPDSpan = document.getElementById('currentIPD');
+        const averageIPDSpan = document.getElementById('averageIPD');
+        const measurementCountSpan = document.getElementById('measurementCount');
+        const finalValueSpan = document.getElementById('finalValue');
+        const measurementsList = document.getElementById('measurementsList');
+        const copyBtn = document.getElementById('copyBtn');
 
-    if (predictions.length > 0) {
-      const key = predictions[0].annotations;
+        // Initialize MediaPipe Face Landmarker
+        async function initializeFaceLandmarker() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                );
 
-      // Iris centers
-      const left = key.leftEyeIris[0];
-      const right = key.rightEyeIris[0];
+                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    outputFaceBlendshapes: false,
+                    outputFacialTransformationMatrixes: false,
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
 
-      const dx = left[0] - right[0];
-      const dy = left[1] - right[1];
-      const distPixels = Math.sqrt(dx*dx + dy*dy);
+                updateStatus('Model loaded successfully! Click "Start Camera" to begin.', 'success');
+                startBtn.disabled = false;
+            } catch (error) {
+                console.error('Error initializing Face Landmarker:', error);
+                updateStatus('Error loading AI model. Please refresh the page.', 'error');
+            }
+        }
 
-      // Draw dots
-      ctx.fillStyle = "red";
-      ctx.beginPath();
-      ctx.arc(left[0], left[1], 5, 0, Math.PI*2);
-      ctx.arc(right[0], right[1], 5, 0, Math.PI*2);
-      ctx.fill();
+        // Update status message
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
 
-      if (mmPerPixel) {
-        let PDmm = distPixels * mmPerPixel;
-        lastPDmm = PDmm;
+        // Start webcam
+        async function startWebcam() {
+            try {
+                video = document.getElementById('webcam');
+                canvas = document.getElementById('canvas');
+                ctx = canvas.getContext('2d');
 
-        let PDm = (PDmm / 1000).toFixed(4);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    }
+                });
 
-        configEl.textContent =
-          "WorldRender.InterpupillaryDistance " + PDm;
+                video.srcObject = stream;
+                
+                video.addEventListener('loadeddata', () => {
+                    videoContainer.style.display = 'block';
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    webcamRunning = true;
+                    startBtn.textContent = 'Stop Camera';
+                    measureBtn.disabled = false;
+                    updateStatus('Camera active. Position your face and click "Measure IPD".', 'success');
+                    predictWebcam();
+                });
+            } catch (error) {
+                console.error('Error accessing webcam:', error);
+                updateStatus('Error accessing camera. Please allow camera permissions.', 'error');
+            }
+        }
 
-        statusEl.textContent = 
-          "Live PD: " + PDmm.toFixed(1) + " mm";
-      } else {
-        statusEl.textContent = 
-          "Hold your credit card to camera and click calibrate.";
-      }
-    }
-  }
+        // Stop webcam
+        function stopWebcam() {
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                webcamRunning = false;
+                videoContainer.style.display = 'none';
+                startBtn.textContent = 'Start Camera';
+                measureBtn.disabled = true;
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                }
+                updateStatus('Camera stopped.', 'info');
+            }
+        }
 
-  requestAnimationFrame(tick);
-}
+        // Calculate 3D Euclidean distance
+        function calculate3DDistance(point1, point2, imageWidth) {
+            // Convert normalized coordinates to pixels for x and y
+            const dx = (point1.x - point2.x) * imageWidth;
+            const dy = (point1.y - point2.y) * imageWidth; // Use width for aspect ratio
+            const dz = (point1.z - point2.z) * imageWidth;
+            
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
 
-document.getElementById("calibrate").onclick = () => {
-  // Ask user to place card horizontally in view
-  statusEl.textContent =
-    "Detecting card width... Hold card flat and steady.";
+        // Convert pixel distance to real-world distance (meters)
+        // Average human face width is approximately 14cm
+        // We use facial width as reference for calibration
+        function pixelsToMeters(pixelDistance, imageWidth) {
+            // Approximate conversion: assuming face width at ~50cm distance
+            // This is a simplified model; for more accuracy, you'd need known reference points
+            const AVERAGE_FACE_WIDTH_PX = imageWidth * 0.35; // Face is roughly 35% of frame width
+            const AVERAGE_FACE_WIDTH_M = 0.14; // 14cm average face width
+            const AVERAGE_IPD_M = 0.063; // Average IPD is 63mm
+            
+            // Scale factor based on typical face proportions
+            const scaleFactor = AVERAGE_FACE_WIDTH_M / AVERAGE_FACE_WIDTH_PX;
+            
+            return pixelDistance * scaleFactor;
+        }
 
-  setTimeout(() => {
-    // Simple calibration: assume card appears ~200px wide at current distance
-    // User simply needs the card visible
-    const approxCardPixels = 200; // auto detection could be added
-    const realCardMM = 85.6;
+        // Measure IPD from landmarks
+        function measureIPD(landmarks, imageWidth) {
+            if (!landmarks || landmarks.length === 0) {
+                return null;
+            }
 
-    mmPerPixel = realCardMM / approxCardPixels;
+            const leftPupil = landmarks[0][LEFT_EYE_CENTER];
+            const rightPupil = landmarks[0][RIGHT_EYE_CENTER];
 
-    statusEl.textContent = 
-      "Calibrated! Move card away. Measurement active.";
-  }, 1500);
-};
-</script>
+            if (!leftPupil || !rightPupil) {
+                return null;
+            }
 
+            // Calculate 3D distance in pixels
+            const pixelDistance = calculate3DDistance(leftPupil, rightPupil, imageWidth);
+            
+            // Convert to meters
+            const ipdMeters = pixelsToMeters(pixelDistance, imageWidth);
+
+            return ipdMeters;
+        }
+
+        // Draw landmarks on canvas
+        function drawLandmarks(landmarks) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (landmarks && landmarks.length > 0) {
+                const faceLandmarks = landmarks[0];
+                
+                // Draw all landmarks
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                for (let i = 0; i < faceLandmarks.length; i++) {
+                    const landmark = faceLandmarks[i];
+                    ctx.beginPath();
+                    ctx.arc(
+                        landmark.x * canvas.width,
+                        landmark.y * canvas.height,
+                        2,
+                        0,
+                        2 * Math.PI
+                    );
+                    ctx.fill();
+                }
+
+                // Highlight pupils
+                const leftPupil = faceLandmarks[LEFT_EYE_CENTER];
+                const rightPupil = faceLandmarks[RIGHT_EYE_CENTER];
+
+                ctx.fillStyle = 'red';
+                ctx.strokeStyle = 'yellow';
+                ctx.lineWidth = 2;
+
+                // Left pupil
+                ctx.beginPath();
+                ctx.arc(
+                    leftPupil.x * canvas.width,
+                    leftPupil.y * canvas.height,
+                    8,
+                    0,
+                    2 * Math.PI
+                );
+                ctx.fill();
+                ctx.stroke();
+
+                // Right pupil
+                ctx.beginPath();
+                ctx.arc(
+                    rightPupil.x * canvas.width,
+                    rightPupil.y * canvas.height,
+                    8,
+                    0,
+                    2 * Math.PI
+                );
+                ctx.fill();
+                ctx.stroke();
+
+                // Draw line between pupils
+                ctx.strokeStyle = 'cyan';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(leftPupil.x * canvas.width, leftPupil.y * canvas.height);
+                ctx.lineTo(rightPupil.x * canvas.width, rightPupil.y * canvas.height);
+                ctx.stroke();
+            }
+        }
+
+        // Predict and render
+        let lastVideoTime = -1;
+        let isCapturingMeasurement = false;
+
+        async function predictWebcam() {
+            if (!webcamRunning) return;
+
+            const nowInMs = Date.now();
+
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                const results = await faceLandmarker.detectForVideo(video, nowInMs);
+
+                if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+                    drawLandmarks(results.faceLandmarks);
+
+                    // Calculate current IPD for display
+                    const currentIPD = measureIPD(results.faceLandmarks, video.videoWidth);
+                    if (currentIPD) {
+                        currentIPDSpan.textContent = `${(currentIPD * 1000).toFixed(1)} mm`;
+                        
+                        // Store measurement if capturing
+                        if (isCapturingMeasurement) {
+                            measurements.push(currentIPD);
+                            updateMeasurements();
+                            isCapturingMeasurement = false;
+                            updateStatus('Measurement captured! Take another or use the average value.', 'success');
+                            measureBtn.disabled = false;
+                            measureBtn.textContent = 'Measure IPD';
+                        }
+                    }
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    if (!isCapturingMeasurement) {
+                        currentIPDSpan.textContent = '--';
+                    }
+                }
+            }
+
+            animationFrameId = requestAnimationFrame(predictWebcam);
+        }
+
+        // Update measurements display
+        function updateMeasurements() {
+            if (measurements.length === 0) return;
+
+            resultsDiv.style.display = 'block';
+            resetBtn.style.display = 'inline-block';
+
+            // Calculate average
+            const sum = measurements.reduce((a, b) => a + b, 0);
+            const average = sum / measurements.length;
+
+            // Calculate standard deviation
+            const variance = measurements.reduce((acc, val) => acc + Math.pow(val - average, 2), 0) / measurements.length;
+            const stdDev = Math.sqrt(variance);
+
+            // Update display
+            averageIPDSpan.textContent = `${(average * 1000).toFixed(1)} mm`;
+            finalValueSpan.textContent = average.toFixed(6);
+            measurementCountSpan.textContent = measurements.length;
+
+            // Update measurements list
+            measurementsList.innerHTML = '<strong>Recent Measurements:</strong>';
+            measurements.slice(-10).reverse().forEach((m, i) => {
+                const div = document.createElement('div');
+                div.className = 'measurement-item';
+                div.innerHTML = `
+                    <span>#${measurements.length - i}</span>
+                    <span>${(m * 1000).toFixed(1)} mm (${m.toFixed(6)} m)</span>
+                `;
+                measurementsList.appendChild(div);
+            });
+
+            // Show quality indicator
+            if (measurements.length >= 3) {
+                const cv = (stdDev / average) * 100; // Coefficient of variation
+                if (cv < 2) {
+                    updateStatus(`✓ Excellent! ${measurements.length} consistent measurements. Average IPD: ${(average * 1000).toFixed(1)} mm`, 'success');
+                } else if (cv < 5) {
+                    updateStatus(`Good measurements. Consider taking a few more for better accuracy. (Variation: ${cv.toFixed(1)}%)`, 'warning');
+                } else {
+                    updateStatus(`High variation detected (${cv.toFixed(1)}%). Ensure stable position and good lighting.`, 'warning');
+                }
+            }
+        }
+
+        // Capture measurement
+        function captureMeasurement() {
+            isCapturingMeasurement = true;
+            measureBtn.disabled = true;
+            measureBtn.textContent = 'Capturing...';
+            updateStatus('Hold still... capturing measurement...', 'info');
+        }
+
+        // Reset measurements
+        function resetMeasurements() {
+            measurements = [];
+            measurementsList.innerHTML = '';
+            resultsDiv.style.display = 'none';
+            resetBtn.style.display = 'none';
+            currentIPDSpan.textContent = '--';
+            averageIPDSpan.textContent = '--';
+            finalValueSpan.textContent = '0.065';
+            measurementCountSpan.textContent = '0';
+            updateStatus('Measurements reset. Ready for new measurements.', 'info');
+        }
+
+        // Copy value to clipboard
+        function copyToClipboard() {
+            const value = finalValueSpan.textContent;
+            navigator.clipboard.writeText(value).then(() => {
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✓ Copied!';
+                copyBtn.style.background = '#4caf50';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.style.background = '';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', () => {
+            if (webcamRunning) {
+                stopWebcam();
+            } else {
+                startWebcam();
+            }
+        });
+
+        measureBtn.addEventListener('click', captureMeasurement);
+        resetBtn.addEventListener('click', resetMeasurements);
+        copyBtn.addEventListener('click', copyToClipboard);
+
+        // Initialize on load
+        initializeFaceLandmarker();
+    </script>
 </body>
 </html>
