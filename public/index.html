@@ -295,7 +295,27 @@
         </div>
     </div>
 
-    <script type="module">
+    <script>
+        // Wait for MediaPipe to load
+        let checkMediaPipeInterval;
+        checkMediaPipeInterval = setInterval(() => {
+            if (typeof window.MediaPipeTasksVision !== 'undefined') {
+                clearInterval(checkMediaPipeInterval);
+                console.log('MediaPipe loaded successfully');
+                initializeApp();
+            }
+        }, 100);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+            if (typeof window.MediaPipeTasksVision === 'undefined') {
+                clearInterval(checkMediaPipeInterval);
+                document.getElementById('status').textContent = 'Error: MediaPipe library failed to load. Please refresh.';
+                document.getElementById('status').className = 'status error';
+            }
+        }, 10000);
+
+        function initializeApp() {
         const { FaceLandmarker, FilesetResolver } = window.MediaPipeTasksVision;
 
         let faceLandmarker;
@@ -656,6 +676,7 @@
 
         // Initialize on load
         initializeFaceLandmarker();
+        }
     </script>
 </body>
 </html>
