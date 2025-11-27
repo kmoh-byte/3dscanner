@@ -512,7 +512,8 @@
             const avgEyeZ = (leftEye.z + rightEye.z) / 2;
             const pitchOffset = Math.abs(noseTip.z - avgEyeZ);
             
-            const isFacing = yawOffset < 0.03 && eyeLevelDiff < 0.02 && pitchOffset < 0.02;
+            // Much more lenient thresholds for real-world usability
+            const isFacing = yawOffset < 0.08 && eyeLevelDiff < 0.05 && pitchOffset < 0.08;
             
             return {
                 facing: isFacing,
@@ -544,7 +545,7 @@
             const avgMovement = (leftPupilMovement + rightPupilMovement) / 2;
             
             // Movement threshold (normalized coordinates)
-            return avgMovement < 0.005; // Allow slightly more movement for usability
+            return avgMovement < 0.01; // Allow reasonable movement for usability
         }
 
         // Measure IPD with high precision using calibrated distance
@@ -612,9 +613,9 @@
                 score += 40;
                 feedback.push('✓ Facing camera');
             } else {
-                if (headPose.yaw > 0.03) feedback.push('❌ Face camera directly (turn head)');
-                if (headPose.roll > 0.02) feedback.push('❌ Level your head');
-                if (headPose.pitch > 0.02) feedback.push('❌ Look straight ahead');
+                if (headPose.yaw > 0.08) feedback.push('❌ Face camera directly (turn head)');
+                if (headPose.roll > 0.05) feedback.push('❌ Level your head');
+                if (headPose.pitch > 0.08) feedback.push('❌ Look straight ahead');
             }
             
             // Stability check (20 points)
@@ -626,7 +627,7 @@
             }
             
             let status = 'error';
-            if (score >= 90) status = 'good';
+            if (score >= 85) status = 'good';
             else if (score >= 60) status = 'warning';
             
             return {
@@ -634,7 +635,7 @@
                 feedback: feedback.join(' | '),
                 status: status,
                 distance: distance,
-                canMeasure: score >= 85
+                canMeasure: score >= 80  // Lower threshold for better UX
             };
         }
 
@@ -803,7 +804,7 @@
                             currentIPDSpan.textContent = `${(currentIPD * 1000).toFixed(1)} mm`;
                             
                             // Auto-capture logic: count perfect frames
-                            if (quality.score >= 95 && !isCapturingMeasurement) {
+                            if (quality.score >= 85 && !isCapturingMeasurement) {
                                 perfectFramesCount++;
                                 
                                 // Show countdown
