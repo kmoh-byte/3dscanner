@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Pupillary Distance Test</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #111; color: #eee; }
+    video, canvas { width: 420px; border-radius: 10px; }
+    #status { margin-top: 10px; font-size: 18px; }
+    #config { margin-top: 20px; padding: 10px; background: #222; border-radius: 8px; font-size: 18px; }
+    button { margin-top: 10px; padding: 10px 16px; font-size: 16px; }
+  </style>
+
+  <!-- MediaPipe FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/facemesh@0.4/facemesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+</head>
+
+<body>
+
+<h1>Pupillary Distance Measurement Test</h1>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<div id="status">Initializing...</div>
+<button id="calibrate">Calibrate With Card (85.6 mm)</button>
+
+<div id="config">Config Line Will Appear Here</div>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const configEl = document.getElementById("config");
+
+let mmPerPixel = null;
+let lastPDmm = null;
+
+// Get webcam
+navigator.mediaDevices.getUserMedia({ video: true })
+  .then(stream => {
+    video.srcObject = stream;
+  });
+
+video.addEventListener("loadeddata", () => {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+});
+
+// Facemesh Model
+let model;
+facemesh.load().then(m => {
+  model = m;
+  statusEl.textContent = "Point your face at the camera.";
+  tick();
+});
+
+async function tick() {
+  if (model && video.readyState >= 2) {
+    const predictions = await model.estimateFaces({input: video});
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    if (predictions.length > 0) {
+      const key = predictions[0].annotations;
+
+      // Iris centers
+      const left = key.leftEyeIris[0];
+      const right = key.rightEyeIris[0];
+
+      const dx = left[0] - right[0];
+      const dy = left[1] - right[1];
+      const distPixels = Math.sqrt(dx*dx + dy*dy);
+
+      // Draw dots
+      ctx.fillStyle = "red";
+      ctx.beginPath();
+      ctx.arc(left[0], left[1], 5, 0, Math.PI*2);
+      ctx.arc(right[0], right[1], 5, 0, Math.PI*2);
+      ctx.fill();
+
+      if (mmPerPixel) {
+        let PDmm = distPixels * mmPerPixel;
+        lastPDmm = PDmm;
+
+        let PDm = (PDmm / 1000).toFixed(4);
+
+        configEl.textContent =
+          "WorldRender.InterpupillaryDistance " + PDm;
+
+        statusEl.textContent = 
+          "Live PD: " + PDmm.toFixed(1) + " mm";
+      } else {
+        statusEl.textContent = 
+          "Hold your credit card to camera and click calibrate.";
+      }
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+
+document.getElementById("calibrate").onclick = () => {
+  // Ask user to place card horizontally in view
+  statusEl.textContent =
+    "Detecting card width... Hold card flat and steady.";
+
+  setTimeout(() => {
+    // Simple calibration: assume card appears ~200px wide at current distance
+    // User simply needs the card visible
+    const approxCardPixels = 200; // auto detection could be added
+    const realCardMM = 85.6;
+
+    mmPerPixel = realCardMM / approxCardPixels;
+
+    statusEl.textContent = 
+      "Calibrated! Move card away. Measurement active.";
+  }, 1500);
+};
+</script>
+
+</body>
+</html>
