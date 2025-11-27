@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interpupillary Distance (IPD) Measurement for VR</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
 
     <style>
         * {
@@ -296,28 +295,11 @@
         </div>
     </div>
 
-    <script>
-        // Wait for MediaPipe to load
-        let checkMediaPipeInterval;
-        checkMediaPipeInterval = setInterval(() => {
-            if (typeof window.FaceLandmarker !== 'undefined' && typeof window.FilesetResolver !== 'undefined') {
-                clearInterval(checkMediaPipeInterval);
-                console.log('MediaPipe loaded successfully');
-                initializeApp();
-            }
-        }, 100);
+    <script type="module">
+        // Import MediaPipe modules
+        import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest';
         
-        // Timeout after 10 seconds
-        setTimeout(() => {
-            if (typeof window.FaceLandmarker === 'undefined' || typeof window.FilesetResolver === 'undefined') {
-                clearInterval(checkMediaPipeInterval);
-                document.getElementById('status').textContent = 'Error: MediaPipe library failed to load. Please refresh.';
-                document.getElementById('status').className = 'status error';
-            }
-        }, 10000);
-
-        function initializeApp() {
-        const { FaceLandmarker, FilesetResolver } = window;
+        console.log('MediaPipe loaded successfully');
 
         let faceLandmarker;
         let webcamRunning = false;
@@ -677,7 +659,6 @@
 
         // Initialize on load
         initializeFaceLandmarker();
-        }
     </script>
 </body>
 </html>
