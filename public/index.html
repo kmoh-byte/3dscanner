@@ -407,33 +407,8 @@
             }
         }
 
-        // Calculate 3D Euclidean distance
-        function calculate3DDistance(point1, point2, imageWidth) {
-            // Convert normalized coordinates to pixels for x and y
-            const dx = (point1.x - point2.x) * imageWidth;
-            const dy = (point1.y - point2.y) * imageWidth; // Use width for aspect ratio
-            const dz = (point1.z - point2.z) * imageWidth;
-            
-            return Math.sqrt(dx * dx + dy * dy + dz * dz);
-        }
-
-        // Convert pixel distance to real-world distance (meters)
-        // Average human face width is approximately 14cm
-        // We use facial width as reference for calibration
-        function pixelsToMeters(pixelDistance, imageWidth) {
-            // Approximate conversion: assuming face width at ~50cm distance
-            // This is a simplified model; for more accuracy, you'd need known reference points
-            const AVERAGE_FACE_WIDTH_PX = imageWidth * 0.35; // Face is roughly 35% of frame width
-            const AVERAGE_FACE_WIDTH_M = 0.14; // 14cm average face width
-            const AVERAGE_IPD_M = 0.063; // Average IPD is 63mm
-            
-            // Scale factor based on typical face proportions
-            const scaleFactor = AVERAGE_FACE_WIDTH_M / AVERAGE_FACE_WIDTH_PX;
-            
-            return pixelDistance * scaleFactor;
-        }
-
-        // Measure IPD from landmarks
+        // Measure IPD from landmarks using MediaPipe's normalized coordinates
+        // MediaPipe's z-coordinate is already normalized to approximate real-world scale
         function measureIPD(landmarks, imageWidth) {
             if (!landmarks || landmarks.length === 0) {
                 return null;
@@ -446,12 +421,24 @@
                 return null;
             }
 
-            // Calculate 3D distance in pixels
-            const pixelDistance = calculate3DDistance(leftPupil, rightPupil, imageWidth);
+            // MediaPipe normalized coordinates are in range [0,1] for x,y
+            // The z coordinate is roughly scaled to face width
+            // Calculate Euclidean distance using normalized coordinates
+            const dx = leftPupil.x - rightPupil.x;
+            const dy = leftPupil.y - rightPupil.y;
+            const dz = leftPupil.z - rightPupil.z;
             
-            // Convert to meters
-            const ipdMeters = pixelsToMeters(pixelDistance, imageWidth);
-
+            // Calculate normalized distance
+            const normalizedDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            // MediaPipe's coordinate system is normalized such that:
+            // - The face width is approximately 1 unit in normalized space
+            // - Average human face width is ~14cm
+            // - Average IPD is ~6.3cm (about 45% of face width)
+            // We scale the normalized distance to meters using average face width
+            const AVERAGE_FACE_WIDTH_M = 0.14; // 14cm
+            const ipdMeters = normalizedDistance * AVERAGE_FACE_WIDTH_M;
+            
             return ipdMeters;
         }
 
