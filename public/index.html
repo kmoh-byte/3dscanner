@@ -284,12 +284,12 @@
         <div class="instructions">
             <h3>📋 Instructions for Accurate Measurement:</h3>
             <ul>
-                <li>Position your face 50-70cm (arm's length) from the camera</li>
-                <li>Ensure good lighting on your face</li>
-                <li>Look directly at the camera</li>
-                <li>Keep your head still during measurement</li>
-                <li>Remove glasses if possible for best accuracy</li>
-                <li>Multiple measurements will be averaged for precision</li>
+                <li><strong>Auto-capture:</strong> Position your face in the oval guide until it turns GREEN</li>
+                <li>Hold perfectly still for 1 second - it will auto-capture!</li>
+                <li>Distance: 50-70cm (arm's length) from camera</li>
+                <li>Look directly at the camera, face forward</li>
+                <li>Good lighting is essential</li>
+                <li>Take 3-5 measurements for best accuracy</li>
             </ul>
         </div>
 
@@ -770,6 +770,8 @@
         // Predict and render
         let lastVideoTime = -1;
         let isCapturingMeasurement = false;
+        let perfectFramesCount = 0;
+        const FRAMES_NEEDED_FOR_AUTO_CAPTURE = 30; // ~1 second at 30fps
 
         async function predictWebcam() {
             if (!webcamRunning) return;
@@ -800,7 +802,37 @@
                         if (currentIPD) {
                             currentIPDSpan.textContent = `${(currentIPD * 1000).toFixed(1)} mm`;
                             
-                            // Store measurement if capturing
+                            // Auto-capture logic: count perfect frames
+                            if (quality.score >= 95 && !isCapturingMeasurement) {
+                                perfectFramesCount++;
+                                
+                                // Show countdown
+                                const secondsRemaining = Math.ceil((FRAMES_NEEDED_FOR_AUTO_CAPTURE - perfectFramesCount) / 30);
+                                if (perfectFramesCount < FRAMES_NEEDED_FOR_AUTO_CAPTURE) {
+                                    positioningInfo.textContent = `✓ PERFECT! Hold still... Auto-capturing in ${secondsRemaining}s`;
+                                }
+                                
+                                // Auto-capture after enough perfect frames
+                                if (perfectFramesCount >= FRAMES_NEEDED_FOR_AUTO_CAPTURE) {
+                                    measurements.push({
+                                        ipd: currentIPD,
+                                        distance: distance,
+                                        quality: quality.score
+                                    });
+                                    updateMeasurements();
+                                    perfectFramesCount = 0;
+                                    
+                                    // Brief pause before allowing next measurement
+                                    setTimeout(() => {
+                                        updateStatus('✓ Measurement captured! Position again for another measurement.', 'success');
+                                    }, 500);
+                                }
+                            } else {
+                                // Reset counter if quality drops
+                                perfectFramesCount = 0;
+                            }
+                            
+                            // Manual capture button still works
                             if (isCapturingMeasurement && quality.score >= 90) {
                                 measurements.push({
                                     ipd: currentIPD,
@@ -812,12 +844,14 @@
                                 updateStatus('✓ High-quality measurement captured!', 'success');
                                 measureBtn.disabled = false;
                                 measureBtn.textContent = 'Measure IPD';
+                                perfectFramesCount = 0;
                             } else if (isCapturingMeasurement && quality.score < 90) {
                                 updateStatus(`Positioning score too low (${quality.score}%). Follow guide and try again.`, 'warning');
                             }
                         }
                     } else {
                         currentIPDSpan.textContent = '--';
+                        perfectFramesCount = 0; // Reset if positioning is lost
                         if (isCapturingMeasurement) {
                             updateStatus('Position your face correctly before measuring.', 'warning');
                         }
@@ -832,6 +866,7 @@
                     }
                 } else {
                     // No face detected
+                    perfectFramesCount = 0; // Reset counter
                     const quality = getPositioningQuality(null);
                     drawLandmarks(null, quality);
                     positioningInfo.textContent = quality.feedback;
