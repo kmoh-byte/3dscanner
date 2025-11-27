@@ -524,7 +524,8 @@
         
         // Check if face is stable (low movement)
         function checkStability(currentLandmarks) {
-            if (!previousLandmarks || !currentLandmarks) return false;
+            // If no previous landmarks, assume stable (first frame)
+            if (!previousLandmarks || !currentLandmarks) return true;
             
             const curr = currentLandmarks[0];
             const prev = previousLandmarks[0];
@@ -543,7 +544,7 @@
             const avgMovement = (leftPupilMovement + rightPupilMovement) / 2;
             
             // Movement threshold (normalized coordinates)
-            return avgMovement < 0.003; // Very small movement allowed
+            return avgMovement < 0.005; // Allow slightly more movement for usability
         }
 
         // Measure IPD with high precision using calibrated distance
