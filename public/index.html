@@ -71,6 +71,43 @@
             transform: scaleX(-1);
         }
 
+        .positioning-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .positioning-info {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            z-index: 11;
+        }
+
+        .positioning-info.good {
+            background: rgba(76, 175, 80, 0.9);
+        }
+
+        .positioning-info.warning {
+            background: rgba(255, 152, 0, 0.9);
+        }
+
+        .positioning-info.error {
+            background: rgba(244, 67, 54, 0.9);
+        }
+
         .controls {
             text-align: center;
             margin-bottom: 30px;
@@ -261,6 +298,7 @@
         <div class="video-container" id="videoContainer" style="display: none;">
             <video id="webcam" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
+            <div class="positioning-info" id="positioningInfo">Initializing...</div>
         </div>
 
         <div class="controls">
@@ -308,10 +346,26 @@
         let ctx;
         let animationFrameId;
         let measurements = [];
+        let calibratedFocalLength = null;
+        let previousLandmarks = null;
 
         // Eye landmark indices in MediaPipe Face Landmarker
         const LEFT_EYE_CENTER = 468;  // Left pupil
         const RIGHT_EYE_CENTER = 473; // Right pupil
+        
+        // Face landmark indices for calibration
+        const LEFT_EYE_OUTER = 33;   // Left eye outer corner
+        const RIGHT_EYE_OUTER = 263;  // Right eye outer corner
+        const NOSE_TIP = 1;           // Nose tip
+        const CHIN = 152;             // Chin
+        const FOREHEAD = 10;          // Forehead
+        
+        // Known facial measurements (average adult)
+        const AVERAGE_FACE_WIDTH = 0.145;  // 14.5cm (eye outer corner to outer corner)
+        const AVERAGE_IPD = 0.063;          // 6.3cm
+        const OPTIMAL_DISTANCE = 0.55;      // 55cm optimal distance
+        const MIN_DISTANCE = 0.45;          // 45cm minimum
+        const MAX_DISTANCE = 0.70;          // 70cm maximum
 
         // DOM elements
         const statusDiv = document.getElementById('status');
@@ -326,6 +380,7 @@
         const finalValueSpan = document.getElementById('finalValue');
         const measurementsList = document.getElementById('measurementsList');
         const copyBtn = document.getElementById('copyBtn');
+        const positioningInfo = document.getElementById('positioningInfo');
 
         // Initialize MediaPipe Face Landmarker
         async function initializeFaceLandmarker() {
@@ -407,77 +462,263 @@
             }
         }
 
-        // Measure IPD from landmarks using MediaPipe's normalized coordinates
-        // MediaPipe's z-coordinate is already normalized to approximate real-world scale
-        function measureIPD(landmarks, imageWidth) {
-            if (!landmarks || landmarks.length === 0) {
-                return null;
+        // Calculate distance from camera using face width
+        function estimateDistanceFromCamera(landmarks) {
+            if (!landmarks || landmarks.length === 0) return null;
+            
+            const faceLandmarks = landmarks[0];
+            const leftEyeOuter = faceLandmarks[LEFT_EYE_OUTER];
+            const rightEyeOuter = faceLandmarks[RIGHT_EYE_OUTER];
+            
+            if (!leftEyeOuter || !rightEyeOuter) return null;
+            
+            // Calculate face width in normalized coordinates
+            const dx = leftEyeOuter.x - rightEyeOuter.x;
+            const dy = leftEyeOuter.y - rightEyeOuter.y;
+            const dz = leftEyeOuter.z - rightEyeOuter.z;
+            const normalizedFaceWidth = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            // Estimate focal length if not calibrated
+            if (!calibratedFocalLength) {
+                // Initial estimate based on typical webcam FOV (60-70 degrees)
+                calibratedFocalLength = canvas.width / (2 * Math.tan(35 * Math.PI / 180));
             }
+            
+            // Calculate distance using similar triangles
+            // distance = (real_size × focal_length) / perceived_size_pixels
+            const perceivedWidthPixels = normalizedFaceWidth * canvas.width;
+            const distance = (AVERAGE_FACE_WIDTH * calibratedFocalLength) / perceivedWidthPixels;
+            
+            return distance;
+        }
+        
+        // Check head pose (facing forward)
+        function checkHeadPose(landmarks) {
+            if (!landmarks || landmarks.length === 0) return { facing: false, angles: null };
+            
+            const faceLandmarks = landmarks[0];
+            const noseTip = faceLandmarks[NOSE_TIP];
+            const leftEye = faceLandmarks[LEFT_EYE_CENTER];
+            const rightEye = faceLandmarks[RIGHT_EYE_CENTER];
+            
+            // Check if nose is centered between eyes (yaw)
+            const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+            const yawOffset = Math.abs(noseTip.x - eyeCenterX);
+            
+            // Check eye level alignment (roll)
+            const eyeLevelDiff = Math.abs(leftEye.y - rightEye.y);
+            
+            // Check z-depth variation (pitch)
+            const avgEyeZ = (leftEye.z + rightEye.z) / 2;
+            const pitchOffset = Math.abs(noseTip.z - avgEyeZ);
+            
+            const isFacing = yawOffset < 0.03 && eyeLevelDiff < 0.02 && pitchOffset < 0.02;
+            
+            return {
+                facing: isFacing,
+                yaw: yawOffset,
+                roll: eyeLevelDiff,
+                pitch: pitchOffset
+            };
+        }
+        
+        // Check if face is stable (low movement)
+        function checkStability(currentLandmarks) {
+            if (!previousLandmarks || !currentLandmarks) return false;
+            
+            const curr = currentLandmarks[0];
+            const prev = previousLandmarks[0];
+            
+            // Compare pupil positions
+            const leftPupilMovement = Math.sqrt(
+                Math.pow(curr[LEFT_EYE_CENTER].x - prev[LEFT_EYE_CENTER].x, 2) +
+                Math.pow(curr[LEFT_EYE_CENTER].y - prev[LEFT_EYE_CENTER].y, 2)
+            );
+            
+            const rightPupilMovement = Math.sqrt(
+                Math.pow(curr[RIGHT_EYE_CENTER].x - prev[RIGHT_EYE_CENTER].x, 2) +
+                Math.pow(curr[RIGHT_EYE_CENTER].y - prev[RIGHT_EYE_CENTER].y, 2)
+            );
+            
+            const avgMovement = (leftPupilMovement + rightPupilMovement) / 2;
+            
+            // Movement threshold (normalized coordinates)
+            return avgMovement < 0.003; // Very small movement allowed
+        }
+
+        // Measure IPD with high precision using calibrated distance
+        function measureIPD(landmarks, distance) {
+            if (!landmarks || landmarks.length === 0) return null;
 
             const leftPupil = landmarks[0][LEFT_EYE_CENTER];
             const rightPupil = landmarks[0][RIGHT_EYE_CENTER];
 
-            if (!leftPupil || !rightPupil) {
-                return null;
-            }
+            if (!leftPupil || !rightPupil) return null;
 
-            // MediaPipe normalized coordinates are in range [0,1] for x,y
-            // The z coordinate is roughly scaled to face width
-            // Calculate Euclidean distance using normalized coordinates
+            // Calculate 3D Euclidean distance in normalized coordinates
             const dx = leftPupil.x - rightPupil.x;
             const dy = leftPupil.y - rightPupil.y;
             const dz = leftPupil.z - rightPupil.z;
-            
-            // Calculate normalized distance
             const normalizedDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             
-            // MediaPipe's coordinate system is normalized such that:
-            // - The face width is approximately 1 unit in normalized space
-            // - Average human face width is ~14cm
-            // - Average IPD is ~6.3cm (about 45% of face width)
-            // We scale the normalized distance to meters using average face width
-            const AVERAGE_FACE_WIDTH_M = 0.14; // 14cm
-            const ipdMeters = normalizedDistance * AVERAGE_FACE_WIDTH_M;
+            // Convert to pixels
+            const pixelDistance = normalizedDistance * canvas.width;
+            
+            // Calculate real-world distance using calibrated focal length and estimated distance
+            // real_size = (pixel_size × distance) / focal_length
+            const ipdMeters = (pixelDistance * distance) / calibratedFocalLength;
             
             return ipdMeters;
         }
+        
+        // Get positioning quality score
+        function getPositioningQuality(landmarks) {
+            if (!landmarks || landmarks.length === 0) {
+                return { score: 0, feedback: 'No face detected', status: 'error' };
+            }
+            
+            const distance = estimateDistanceFromCamera(landmarks);
+            const headPose = checkHeadPose(landmarks);
+            const isStable = checkStability(landmarks);
+            
+            let score = 0;
+            let feedback = [];
+            
+            // Distance check (40 points)
+            if (distance) {
+                if (distance >= MIN_DISTANCE && distance <= MAX_DISTANCE) {
+                    const distanceScore = 40 * (1 - Math.abs(distance - OPTIMAL_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE));
+                    score += distanceScore;
+                    
+                    if (Math.abs(distance - OPTIMAL_DISTANCE) < 0.05) {
+                        feedback.push('✓ Perfect distance');
+                    } else if (distance < OPTIMAL_DISTANCE) {
+                        feedback.push('⚠ Move back slightly');
+                    } else {
+                        feedback.push('⚠ Move closer');
+                    }
+                } else {
+                    if (distance < MIN_DISTANCE) {
+                        feedback.push('❌ Too close! Move back');
+                    } else {
+                        feedback.push('❌ Too far! Move closer');
+                    }
+                }
+            }
+            
+            // Head pose check (40 points)
+            if (headPose.facing) {
+                score += 40;
+                feedback.push('✓ Facing camera');
+            } else {
+                if (headPose.yaw > 0.03) feedback.push('❌ Face camera directly (turn head)');
+                if (headPose.roll > 0.02) feedback.push('❌ Level your head');
+                if (headPose.pitch > 0.02) feedback.push('❌ Look straight ahead');
+            }
+            
+            // Stability check (20 points)
+            if (isStable) {
+                score += 20;
+                feedback.push('✓ Stable');
+            } else {
+                feedback.push('⚠ Hold still');
+            }
+            
+            let status = 'error';
+            if (score >= 90) status = 'good';
+            else if (score >= 60) status = 'warning';
+            
+            return {
+                score: Math.round(score),
+                feedback: feedback.join(' | '),
+                status: status,
+                distance: distance,
+                canMeasure: score >= 85
+            };
+        }
 
-        // Draw landmarks on canvas
-        function drawLandmarks(landmarks) {
+        // Draw positioning guide and landmarks
+        function drawLandmarks(landmarks, quality) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw face positioning guide oval
+            const guideWidth = canvas.width * 0.50;
+            const guideHeight = canvas.height * 0.65;
+            const guideCenterX = canvas.width / 2;
+            const guideCenterY = canvas.height / 2;
+            
+            // Set guide color based on quality
+            let guideColor = 'rgba(244, 67, 54, 0.6)';  // Red (bad)
+            if (quality && quality.status === 'good') {
+                guideColor = 'rgba(76, 175, 80, 0.6)';  // Green (perfect)
+            } else if (quality && quality.status === 'warning') {
+                guideColor = 'rgba(255, 152, 0, 0.6)';  // Orange (ok)
+            }
+            
+            // Draw guide oval
+            ctx.strokeStyle = guideColor;
+            ctx.lineWidth = 4;
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.ellipse(guideCenterX, guideCenterY, guideWidth / 2, guideHeight / 2, 0, 0, 2 * Math.PI);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Draw center crosshair
+            ctx.strokeStyle = guideColor;
+            ctx.lineWidth = 2;
+            const crosshairSize = 20;
+            ctx.beginPath();
+            ctx.moveTo(guideCenterX - crosshairSize, guideCenterY);
+            ctx.lineTo(guideCenterX + crosshairSize, guideCenterY);
+            ctx.moveTo(guideCenterX, guideCenterY - crosshairSize);
+            ctx.lineTo(guideCenterX, guideCenterY + crosshairSize);
+            ctx.stroke();
+            
+            // Draw text instructions on guide
+            ctx.fillStyle = guideColor;
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Position your face here', guideCenterX, guideCenterY - guideHeight / 2 - 15);
 
             if (landmarks && landmarks.length > 0) {
                 const faceLandmarks = landmarks[0];
                 
-                // Draw all landmarks
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
-                for (let i = 0; i < faceLandmarks.length; i++) {
-                    const landmark = faceLandmarks[i];
-                    ctx.beginPath();
-                    ctx.arc(
-                        landmark.x * canvas.width,
-                        landmark.y * canvas.height,
-                        2,
-                        0,
-                        2 * Math.PI
-                    );
-                    ctx.fill();
+                // Draw key landmarks only (less clutter)
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+                const keyLandmarks = [LEFT_EYE_OUTER, RIGHT_EYE_OUTER, NOSE_TIP, CHIN, FOREHEAD];
+                for (let idx of keyLandmarks) {
+                    const landmark = faceLandmarks[idx];
+                    if (landmark) {
+                        ctx.beginPath();
+                        ctx.arc(
+                            landmark.x * canvas.width,
+                            landmark.y * canvas.height,
+                            3,
+                            0,
+                            2 * Math.PI
+                        );
+                        ctx.fill();
+                    }
                 }
 
-                // Highlight pupils
+                // Highlight pupils with different colors based on quality
                 const leftPupil = faceLandmarks[LEFT_EYE_CENTER];
                 const rightPupil = faceLandmarks[RIGHT_EYE_CENTER];
 
-                ctx.fillStyle = 'red';
-                ctx.strokeStyle = 'yellow';
-                ctx.lineWidth = 2;
+                const pupilColor = quality && quality.status === 'good' ? '#00ff00' : 
+                                   quality && quality.status === 'warning' ? '#ff9800' : '#ff0000';
+                
+                ctx.fillStyle = pupilColor;
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
 
                 // Left pupil
                 ctx.beginPath();
                 ctx.arc(
                     leftPupil.x * canvas.width,
                     leftPupil.y * canvas.height,
-                    8,
+                    10,
                     0,
                     2 * Math.PI
                 );
@@ -489,7 +730,7 @@
                 ctx.arc(
                     rightPupil.x * canvas.width,
                     rightPupil.y * canvas.height,
-                    8,
+                    10,
                     0,
                     2 * Math.PI
                 );
@@ -497,11 +738,30 @@
                 ctx.stroke();
 
                 // Draw line between pupils
-                ctx.strokeStyle = 'cyan';
-                ctx.lineWidth = 3;
+                ctx.strokeStyle = pupilColor;
+                ctx.lineWidth = 4;
                 ctx.beginPath();
                 ctx.moveTo(leftPupil.x * canvas.width, leftPupil.y * canvas.height);
                 ctx.lineTo(rightPupil.x * canvas.width, rightPupil.y * canvas.height);
+                ctx.stroke();
+                
+                // Draw face outline to show detected face
+                ctx.strokeStyle = guideColor;
+                ctx.lineWidth = 2;
+                const leftEye = faceLandmarks[LEFT_EYE_OUTER];
+                const rightEye = faceLandmarks[RIGHT_EYE_OUTER];
+                const noseTip = faceLandmarks[NOSE_TIP];
+                const chin = faceLandmarks[CHIN];
+                
+                // Draw simple face boundary
+                ctx.beginPath();
+                ctx.ellipse(
+                    (leftEye.x + rightEye.x) / 2 * canvas.width,
+                    (noseTip.y + chin.y) / 2 * canvas.height,
+                    Math.abs(leftEye.x - rightEye.x) * canvas.width * 0.8,
+                    Math.abs(noseTip.y - chin.y) * canvas.height * 0.6,
+                    0, 0, 2 * Math.PI
+                );
                 ctx.stroke();
             }
         }
@@ -520,28 +780,67 @@
                 const results = await faceLandmarker.detectForVideo(video, nowInMs);
 
                 if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-                    drawLandmarks(results.faceLandmarks);
+                    // Get positioning quality
+                    const quality = getPositioningQuality(results.faceLandmarks);
+                    
+                    // Draw landmarks with quality-based colors
+                    drawLandmarks(results.faceLandmarks, quality);
+                    
+                    // Update positioning info display
+                    positioningInfo.textContent = `Score: ${quality.score}% | ${quality.feedback}`;
+                    positioningInfo.className = `positioning-info ${quality.status}`;
+                    
+                    // Calculate distance
+                    const distance = estimateDistanceFromCamera(results.faceLandmarks);
 
                     // Calculate current IPD for display
-                    const currentIPD = measureIPD(results.faceLandmarks, video.videoWidth);
-                    if (currentIPD) {
-                        currentIPDSpan.textContent = `${(currentIPD * 1000).toFixed(1)} mm`;
-                        
-                        // Store measurement if capturing
+                    if (distance && quality.canMeasure) {
+                        const currentIPD = measureIPD(results.faceLandmarks, distance);
+                        if (currentIPD) {
+                            currentIPDSpan.textContent = `${(currentIPD * 1000).toFixed(1)} mm`;
+                            
+                            // Store measurement if capturing
+                            if (isCapturingMeasurement && quality.score >= 90) {
+                                measurements.push({
+                                    ipd: currentIPD,
+                                    distance: distance,
+                                    quality: quality.score
+                                });
+                                updateMeasurements();
+                                isCapturingMeasurement = false;
+                                updateStatus('✓ High-quality measurement captured!', 'success');
+                                measureBtn.disabled = false;
+                                measureBtn.textContent = 'Measure IPD';
+                            } else if (isCapturingMeasurement && quality.score < 90) {
+                                updateStatus(`Positioning score too low (${quality.score}%). Follow guide and try again.`, 'warning');
+                            }
+                        }
+                    } else {
+                        currentIPDSpan.textContent = '--';
                         if (isCapturingMeasurement) {
-                            measurements.push(currentIPD);
-                            updateMeasurements();
-                            isCapturingMeasurement = false;
-                            updateStatus('Measurement captured! Take another or use the average value.', 'success');
-                            measureBtn.disabled = false;
-                            measureBtn.textContent = 'Measure IPD';
+                            updateStatus('Position your face correctly before measuring.', 'warning');
                         }
                     }
+                    
+                    // Update previous landmarks for stability check
+                    previousLandmarks = results.faceLandmarks;
+                    
+                    // Enable/disable measure button based on quality
+                    if (!isCapturingMeasurement) {
+                        measureBtn.disabled = !quality.canMeasure;
+                    }
                 } else {
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    // No face detected
+                    const quality = getPositioningQuality(null);
+                    drawLandmarks(null, quality);
+                    positioningInfo.textContent = quality.feedback;
+                    positioningInfo.className = `positioning-info ${quality.status}`;
+                    
                     if (!isCapturingMeasurement) {
                         currentIPDSpan.textContent = '--';
+                        measureBtn.disabled = true;
                     }
+                    previousLandmarks = null;
                 }
             }
 
@@ -555,27 +854,38 @@
             resultsDiv.style.display = 'block';
             resetBtn.style.display = 'inline-block';
 
-            // Calculate average
-            const sum = measurements.reduce((a, b) => a + b, 0);
+            // Extract IPD values
+            const ipdValues = measurements.map(m => m.ipd);
+            
+            // Calculate weighted average (weight by quality score)
+            const totalWeight = measurements.reduce((sum, m) => sum + m.quality, 0);
+            const weightedSum = measurements.reduce((sum, m) => sum + (m.ipd * m.quality), 0);
+            const weightedAverage = weightedSum / totalWeight;
+            
+            // Calculate simple average for comparison
+            const sum = ipdValues.reduce((a, b) => a + b, 0);
             const average = sum / measurements.length;
 
             // Calculate standard deviation
-            const variance = measurements.reduce((acc, val) => acc + Math.pow(val - average, 2), 0) / measurements.length;
+            const variance = ipdValues.reduce((acc, val) => acc + Math.pow(val - average, 2), 0) / measurements.length;
             const stdDev = Math.sqrt(variance);
 
+            // Use weighted average as final value
+            const finalIPD = weightedAverage;
+
             // Update display
-            averageIPDSpan.textContent = `${(average * 1000).toFixed(1)} mm`;
-            finalValueSpan.textContent = average.toFixed(6);
+            averageIPDSpan.textContent = `${(finalIPD * 1000).toFixed(2)} mm`;
+            finalValueSpan.textContent = finalIPD.toFixed(6);
             measurementCountSpan.textContent = measurements.length;
 
             // Update measurements list
-            measurementsList.innerHTML = '<strong>Recent Measurements:</strong>';
+            measurementsList.innerHTML = '<strong>Recent Measurements (with quality scores):</strong>';
             measurements.slice(-10).reverse().forEach((m, i) => {
                 const div = document.createElement('div');
                 div.className = 'measurement-item';
                 div.innerHTML = `
-                    <span>#${measurements.length - i}</span>
-                    <span>${(m * 1000).toFixed(1)} mm (${m.toFixed(6)} m)</span>
+                    <span>#${measurements.length - i} (Q: ${m.quality}%)</span>
+                    <span>${(m.ipd * 1000).toFixed(2)} mm @ ${(m.distance * 100).toFixed(0)}cm</span>
                 `;
                 measurementsList.appendChild(div);
             });
@@ -583,13 +893,17 @@
             // Show quality indicator
             if (measurements.length >= 3) {
                 const cv = (stdDev / average) * 100; // Coefficient of variation
-                if (cv < 2) {
-                    updateStatus(`✓ Excellent! ${measurements.length} consistent measurements. Average IPD: ${(average * 1000).toFixed(1)} mm`, 'success');
-                } else if (cv < 5) {
-                    updateStatus(`Good measurements. Consider taking a few more for better accuracy. (Variation: ${cv.toFixed(1)}%)`, 'warning');
+                const avgQuality = measurements.reduce((sum, m) => sum + m.quality, 0) / measurements.length;
+                
+                if (cv < 1.5 && avgQuality >= 95) {
+                    updateStatus(`✓ EXCELLENT! ${measurements.length} high-precision measurements. Final IPD: ${(finalIPD * 1000).toFixed(2)} mm (±${(stdDev * 1000).toFixed(2)} mm)`, 'success');
+                } else if (cv < 3) {
+                    updateStatus(`✓ Good measurements. Average quality: ${avgQuality.toFixed(0)}%. Final IPD: ${(finalIPD * 1000).toFixed(2)} mm`, 'success');
                 } else {
-                    updateStatus(`High variation detected (${cv.toFixed(1)}%). Ensure stable position and good lighting.`, 'warning');
+                    updateStatus(`Variation: ${cv.toFixed(1)}%. Take more measurements with better positioning for higher accuracy.`, 'warning');
                 }
+            } else {
+                updateStatus(`${measurements.length} measurement(s) captured. Take at least 3-5 for best accuracy.`, 'info');
             }
         }
 
@@ -598,7 +912,7 @@
             isCapturingMeasurement = true;
             measureBtn.disabled = true;
             measureBtn.textContent = 'Capturing...';
-            updateStatus('Hold still... capturing measurement...', 'info');
+            updateStatus('Hold still... capturing high-precision measurement...', 'info');
         }
 
         // Reset measurements
